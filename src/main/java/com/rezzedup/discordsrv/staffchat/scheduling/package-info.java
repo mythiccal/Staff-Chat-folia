@@ -21,6 +21,6 @@
  * THE SOFTWARE.
  */
 @NonNullPackage
-package com.rezzedup.discordsrv.staffchat.commands;
+package com.rezzedup.discordsrv.staffchat.scheduling;
 
 import pl.tlinkowski.annotation.basic.NonNullPackage;

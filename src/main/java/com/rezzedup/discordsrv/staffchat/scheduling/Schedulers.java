@@ -20,7 +20,26 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-@NonNullPackage
-package com.rezzedup.discordsrv.staffchat.commands;
+package com.rezzedup.discordsrv.staffchat.scheduling;
 
-import pl.tlinkowski.annotation.basic.NonNullPackage;
+import org.bukkit.plugin.Plugin;
+
+public final class Schedulers {
+	private Schedulers() {}
+	
+	public static ServerScheduler create(Plugin plugin) {
+		if (hasRegionizedSchedulers()) {
+			return new PaperServerScheduler(plugin);
+		}
+		return new BukkitServerScheduler(plugin);
+	}
+	
+	private static boolean hasRegionizedSchedulers() {
+		try {
+			Class.forName("io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler");
+			return true;
+		} catch (ClassNotFoundException exception) {
+			return false;
+		}
+	}
+}

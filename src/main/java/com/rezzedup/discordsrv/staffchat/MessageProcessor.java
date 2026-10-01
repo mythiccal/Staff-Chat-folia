@@ -1,6 +1,6 @@
 /*
  * The MIT License
- * Copyright © 2017-2024 RezzedUp and Contributors
+ * Copyright © 2017-2026 RezzedUp and Contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -62,7 +62,16 @@ public class MessageProcessor {
 		}
 		
 		String formatted = plugin.messages().getOrDefault(format);
+		Runnable deliver = () -> deliverFormattedChatMessage(author, formatted, placeholders);
 		
+		if (author instanceof Player) {
+			plugin.scheduler().runEntity((Player) author, deliver);
+		} else {
+			plugin.scheduler().runGlobal(deliver);
+		}
+	}
+	
+	private void deliverFormattedChatMessage(@NullOr Object author, String formatted, MappedPlaceholder placeholders) {
 		if (plugin.getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
 			// Update format's PAPI placeholders before inserting the message
 			// (which *could* contain arbitrary placeholders itself, ah placeholder injection).
@@ -89,12 +98,11 @@ public class MessageProcessor {
 			}
 		}
 		
-		plugin.onlineStaffChatParticipants().forEach(staff -> {
+		plugin.deliverToReceivingStaff(null, staff -> {
 			staff.sendMessage(content);
 			plugin.config().playMessageSound(staff);
 		});
-		
-		plugin.getServer().getConsoleSender().sendMessage(content);
+		plugin.deliverToConsole(content);
 	}
 	
 	private void sendToDiscord(Consumer<TextChannel> sender) {
@@ -116,7 +124,10 @@ public class MessageProcessor {
 	
 	public void processConsoleChat(String message) {
 		Objects.requireNonNull(message, "message");
-		
+		plugin.scheduler().runGlobal(() -> handleConsoleChat(message));
+	}
+	
+	private void handleConsoleChat(String message) {
 		plugin.debug(getClass()).logConsoleChatMessage(message);
 		
 		ConsoleStaffChatMessageEvent event =
@@ -148,7 +159,10 @@ public class MessageProcessor {
 	public void processPlayerChat(Player author, String message) {
 		Objects.requireNonNull(author, "author");
 		Objects.requireNonNull(message, "message");
-		
+		plugin.scheduler().runEntity(author, () -> handlePlayerChat(author, message));
+	}
+	
+	private void handlePlayerChat(Player author, String message) {
 		plugin.debug(getClass()).logPlayerChatMessage(author, message);
 		
 		PlayerStaffChatMessageEvent event =
@@ -166,8 +180,8 @@ public class MessageProcessor {
 		
 		if (plugin.isDiscordSrvHookEnabled()) {
 			sendToDiscord(channel -> {
-				// Send to discord off the main thread (just like DiscordSRV does)
-				plugin.async().run(() ->
+				// Send to discord off the region thread (just like DiscordSRV does)
+				plugin.scheduler().runAsync(() ->
 					DiscordSRV.getPlugin().processChatMessage(author, message, StaffChatPlugin.CHANNEL, false)
 				);
 			});
@@ -181,7 +195,10 @@ public class MessageProcessor {
 	public void processDiscordChat(User author, Message message) {
 		Objects.requireNonNull(author, "author");
 		Objects.requireNonNull(message, "message");
-		
+		plugin.scheduler().runGlobal(() -> handleDiscordChat(author, message));
+	}
+	
+	private void handleDiscordChat(User author, Message message) {
 		plugin.debug(getClass()).logDiscordChatMessage(author, message);
 		
 		DiscordStaffChatMessageEvent event =

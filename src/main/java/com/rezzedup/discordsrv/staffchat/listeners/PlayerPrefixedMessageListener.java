@@ -1,6 +1,6 @@
 /*
  * The MIT License
- * Copyright © 2017-2024 RezzedUp and Contributors
+ * Copyright © 2017-2026 RezzedUp and Contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,9 +34,14 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
 @SuppressWarnings("unused")
 public class PlayerPrefixedMessageListener implements Listener {
 	private final StaffChatPlugin plugin;
+	private final Set<UUID> resending = ConcurrentHashMap.newKeySet();
 	
 	public PlayerPrefixedMessageListener(StaffChatPlugin plugin) {
 		this.plugin = plugin;
@@ -45,12 +50,12 @@ public class PlayerPrefixedMessageListener implements Listener {
 	@EventListener(ListenerOrder.EARLY)
 	@CancelledEvents(CancellationPolicy.REJECT)
 	public void onPrefixedChatEarly(AsyncPlayerChatEvent event) {
-		if (!plugin.config().getOrDefault(StaffChatConfig.PREFIXED_CHAT_ENABLED)) {
+		Player player = event.getPlayer();
+		if (resending.contains(player.getUniqueId())) {
 			return;
 		}
 		
-		Player player = event.getPlayer();
-		if (Permissions.ACCESS.denies(player)) {
+		if (!plugin.config().getOrDefault(StaffChatConfig.PREFIXED_CHAT_ENABLED)) {
 			return;
 		}
 		
@@ -75,17 +80,17 @@ public class PlayerPrefixedMessageListener implements Listener {
 	
 	@EventListener(ListenerOrder.MONITOR)
 	public void onPrefixedChatMonitor(AsyncPlayerChatEvent event) {
+		Player player = event.getPlayer();
+		if (resending.remove(player.getUniqueId())) {
+			return;
+		}
+		
 		// Event should already be cancelled in the early listener.
 		if (!event.isCancelled()) {
 			return;
 		}
 		
 		if (!plugin.config().getOrDefault(StaffChatConfig.PREFIXED_CHAT_ENABLED)) {
-			return;
-		}
-		
-		Player player = event.getPlayer();
-		if (Permissions.ACCESS.denies(player)) {
 			return;
 		}
 		
@@ -103,12 +108,18 @@ public class PlayerPrefixedMessageListener implements Listener {
 		String unprefixed = message.substring(identifier.length()).trim();
 		String submission = (Strings.isEmptyOrNull(unprefixed)) ? message : unprefixed;
 		
-		plugin.debug(getClass()).log(event, () ->
-			"Monitor Listener: Sending prefixed chat from player(" + player.getName() + ") identified " +
-				"by prefix(\"" + identifier + "\"): message(\"" + submission + "\")"
-		);
-		
-		// Handle this on the main thread next tick.
-		plugin.sync().run(() -> plugin.submitMessageFromPlayer(player, submission));
+		plugin.scheduler().runEntity(player, () -> {
+			if (Permissions.ACCESS.denies(player)) {
+				resending.add(player.getUniqueId());
+				player.chat(message);
+				return;
+			}
+			
+			plugin.debug(getClass()).log(event, () ->
+				"Monitor Listener: Sending prefixed chat from player(" + player.getName() + ") identified " +
+					"by prefix(\"" + identifier + "\"): message(\"" + submission + "\")"
+			);
+			plugin.submitMessageFromPlayer(player, submission);
+		});
 	}
 }

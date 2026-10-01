@@ -1,6 +1,6 @@
 /*
  * The MIT License
- * Copyright © 2017-2024 RezzedUp and Contributors
+ * Copyright © 2017-2026 RezzedUp and Contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -123,14 +123,21 @@ public class ManageStaffChatCommand implements CommandExecutor, TabCompleter {
 	}
 	
 	private void reload(CommandSender sender) {
-		plugin.debug(getClass()).log("Reload", () -> "Reloading configs and data...");
-		
-		plugin.config().reload();
-		plugin.messages().reload();
-		plugin.data().reload();
-		plugin.updater().reload();
-		
-		sender.sendMessage(colorful("&9&lDiscordSRV-Staff-Chat&f: Reloaded."));
+		plugin.scheduler().runGlobal(() -> {
+			plugin.debug(getClass()).log("Reload", () -> "Reloading configs and data...");
+			
+			plugin.config().reload();
+			plugin.messages().reload();
+			plugin.data().reloadSynced();
+			plugin.updater().reload();
+			
+			String reloaded = colorful("&9&lDiscordSRV-Staff-Chat&f: Reloaded.");
+			if (sender instanceof Player) {
+				plugin.scheduler().runEntity((Player) sender, () -> sender.sendMessage(reloaded));
+			} else {
+				sender.sendMessage(reloaded);
+			}
+		});
 	}
 	
 	private void debug(CommandSender sender) {
@@ -142,9 +149,10 @@ public class ManageStaffChatCommand implements CommandExecutor, TabCompleter {
 			sender.sendMessage(colorful("&9[Debug] &2→ &aEnabled debugging"));
 			
 			if (sender instanceof Player) {
+				Player player = (Player) sender;
 				sender.sendMessage(colorful("&9[Debug]&o Sending a test message..."));
-				plugin.sync().delay(10).ticks().run(() ->
-					plugin.getServer().dispatchCommand(sender, "staffchat Hello! Just testing things...")
+				plugin.scheduler().runEntityDelayed(player, 10L, () ->
+					plugin.getServer().dispatchCommand(player, "staffchat Hello! Just testing things...")
 				);
 			}
 		} else {

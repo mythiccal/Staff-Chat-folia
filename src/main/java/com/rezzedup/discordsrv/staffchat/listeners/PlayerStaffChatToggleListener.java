@@ -1,6 +1,6 @@
 /*
  * The MIT License
- * Copyright © 2017-2024 RezzedUp and Contributors
+ * Copyright © 2017-2026 RezzedUp and Contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -46,7 +46,7 @@ public class PlayerStaffChatToggleListener implements Listener {
 	
 	@EventListener(ListenerOrder.FIRST)
 	public void onAutomaticChatFirst(AsyncPlayerChatEvent event) {
-		if (plugin.data().isAutomaticStaffChatEnabled(event.getPlayer())) {
+		if (plugin.data().hasAutomaticStaffChat(event.getPlayer().getUniqueId())) {
 			event.setCancelled(true); // Cancel this message from getting sent to global chat.
 			// Handle message in a later listener order, allowing other plugins to modify the message.
 		}
@@ -55,32 +55,31 @@ public class PlayerStaffChatToggleListener implements Listener {
 	@EventListener(ListenerOrder.MONITOR)
 	public void onAutomaticChatMonitor(AsyncPlayerChatEvent event) {
 		Player player = event.getPlayer();
-		if (!plugin.data().isAutomaticStaffChatEnabled(player)) {
+		if (!plugin.data().hasAutomaticStaffChat(player.getUniqueId())) {
 			return;
 		}
 		
 		event.setCancelled(true); // Cancel this message from getting sent to global chat.
 		// The event could've been uncancelled since cancelling it the first time.
+		String message = event.getMessage();
 		
-		if (Permissions.ACCESS.allows(player)) {
-			plugin.debug(getClass()).log(event, () ->
-				"Player " + player.getName() + " has automatic staff-chat enabled"
-			);
-			
-			// Handle this on the main thread next tick.
-			plugin.sync().run(() -> plugin.submitMessageFromPlayer(event.getPlayer(), event.getMessage()));
-		} else {
-			plugin.debug(getClass()).log(event, () ->
-				"Player " + player.getName() + " has automatic staff-chat enabled " +
-					"but they don't have permission to use the staff chat"
-			);
-			
-			// Remove this non-staff profile (but in sync 'cus it calls an event).
-			plugin.sync().run(() -> {
+		plugin.scheduler().runEntity(player, () -> {
+			if (Permissions.ACCESS.allows(player)) {
+				plugin.debug(getClass()).log(event, () ->
+					"Player " + player.getName() + " has automatic staff-chat enabled"
+				);
+				plugin.submitMessageFromPlayer(player, message);
+			} else {
+				plugin.debug(getClass()).log(event, () ->
+					"Player " + player.getName() + " has automatic staff-chat enabled " +
+						"but they don't have permission to use the staff chat"
+				);
+				
+				// Drop the toggle, then resend so the message still reaches global chat.
 				plugin.data().updateProfile(player);
-				player.chat(event.getMessage());
-			});
-		}
+				player.chat(message);
+			}
+		});
 	}
 	
 	@EventListener(ListenerOrder.LAST)

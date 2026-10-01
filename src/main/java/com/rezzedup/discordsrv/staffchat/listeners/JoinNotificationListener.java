@@ -1,6 +1,6 @@
 /*
  * The MIT License
- * Copyright © 2017-2024 RezzedUp and Contributors
+ * Copyright © 2017-2026 RezzedUp and Contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -89,13 +89,13 @@ public class JoinNotificationListener implements Listener {
 			return;
 		}
 		
-		plugin.sync().delay(10).ticks().every(10).ticks().run(task ->
+		plugin.scheduler().runEntityRepeating(player, 10L, 10L, task ->
 		{
-			if (reminders.isEmpty()) {
+			if (reminders.isEmpty() || !player.isOnline()) {
 				task.cancel();
-			} else {
-				reminders.pop().run();
+				return;
 			}
+			reminders.pop().run();
 		});
 	}
 	

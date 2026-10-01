@@ -1,6 +1,6 @@
 /*
  * The MIT License
- * Copyright © 2017-2024 RezzedUp and Contributors
+ * Copyright © 2017-2026 RezzedUp and Contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,8 +37,9 @@ import com.rezzedup.discordsrv.staffchat.listeners.PlayerStaffChatToggleListener
 import com.rezzedup.discordsrv.staffchat.util.FileIO;
 import community.leaf.configvalues.bukkit.YamlValue;
 import community.leaf.configvalues.bukkit.data.YamlDataFile;
+import com.rezzedup.discordsrv.staffchat.scheduling.Schedulers;
+import com.rezzedup.discordsrv.staffchat.scheduling.ServerScheduler;
 import community.leaf.eventful.bukkit.BukkitEventSource;
-import community.leaf.tasks.bukkit.BukkitTaskSource;
 import github.scarsz.discordsrv.DiscordSRV;
 import github.scarsz.discordsrv.dependencies.jda.api.entities.Message;
 import github.scarsz.discordsrv.dependencies.jda.api.entities.TextChannel;
@@ -55,15 +56,19 @@ import pl.tlinkowski.annotation.basic.NullOr;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
-public class StaffChatPlugin extends JavaPlugin implements BukkitTaskSource, BukkitEventSource, StaffChatAPI {
+public class StaffChatPlugin extends JavaPlugin implements BukkitEventSource, StaffChatAPI {
 	// https://bstats.org/plugin/bukkit/DiscordSRV-Staff-Chat/11056
 	public static final int BSTATS = 11056;
 	
 	public static final String CHANNEL = "staff-chat";
 	
 	public static final String DISCORDSRV = "DiscordSRV";
+	
+	private final ServerScheduler scheduler = Schedulers.create(this);
 	
 	private @NullOr Version version;
 	private @NullOr Path pluginDirectoryPath;
@@ -129,9 +134,11 @@ public class StaffChatPlugin extends JavaPlugin implements BukkitTaskSource, Buk
 		
 		// Display toggle message so that auto staff-chat users are aware that their chat is private again.
 		// Useful when hot loading this plugin on a live server.
-		onlineStaffChatParticipants()
-			.filter(data()::isAutomaticStaffChatEnabled)
-			.forEach(messages()::notifyAutoChatEnabled);
+		runForOnlinePlayers(player -> {
+			if (data().isAutomaticStaffChatEnabled(player)) {
+				messages().notifyAutoChatEnabled(player);
+			}
+		});
 	}
 	
 	@Override
@@ -143,9 +150,12 @@ public class StaffChatPlugin extends JavaPlugin implements BukkitTaskSource, Buk
 		
 		// Display toggle message so that auto staff-chat users are aware that their chat is public again.
 		// Useful when selectively disabling this plugin on a live server.
-		onlineStaffChatParticipants()
-			.filter(data()::isAutomaticStaffChatEnabled)
-			.forEach(messages()::notifyAutoChatDisabled);
+		// Scheduling during disable is best-effort: the server may cancel these tasks immediately.
+		runForOnlinePlayers(player -> {
+			if (data().isAutomaticStaffChatEnabled(player)) {
+				messages().notifyAutoChatDisabled(player);
+			}
+		});
 		
 		if (isDiscordSrvHookEnabled()) {
 			debug(getClass()).log("Disable", () -> "Unsubscribing from DiscordSRV API (hook is enabled)");
@@ -169,6 +179,34 @@ public class StaffChatPlugin extends JavaPlugin implements BukkitTaskSource, Buk
 	@Override
 	public Plugin plugin() {
 		return this;
+	}
+	
+	public ServerScheduler scheduler() {
+		return scheduler;
+	}
+	
+	public void deliverToConsole(String message) {
+		scheduler.runGlobal(() -> getServer().getConsoleSender().sendMessage(message));
+	}
+	
+	public void deliverToReceivingStaff(@NullOr Player except, Consumer<Player> action) {
+		for (Player player : new ArrayList<>(getServer().getOnlinePlayers())) {
+			if (except != null && except.getUniqueId().equals(player.getUniqueId())) {
+				continue;
+			}
+			scheduler.runEntity(player, () -> {
+				if (Permissions.ACCESS.denies(player) || !data().isReceivingStaffChatMessages(player)) {
+					return;
+				}
+				action.accept(player);
+			});
+		}
+	}
+	
+	private void runForOnlinePlayers(Consumer<Player> action) {
+		for (Player player : new ArrayList<>(getServer().getOnlinePlayers())) {
+			scheduler.runEntity(player, () -> action.accept(player));
+		}
 	}
 	
 	public Version version() {
@@ -332,7 +370,7 @@ public class StaffChatPlugin extends JavaPlugin implements BukkitTaskSource, Buk
 		debug(getClass()).log("Metrics", () -> "Scheduling metrics to start one minute from now");
 		
 		// Start a minute later to get the most accurate data.
-		sync().delay(1).minutes().run(() ->
+		scheduler.runGlobalDelayed(20L * 60L, () ->
 		{
 			Metrics metrics = new Metrics(this, BSTATS);
 			

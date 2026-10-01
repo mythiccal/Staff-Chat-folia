@@ -20,7 +20,29 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-@NonNullPackage
-package com.rezzedup.discordsrv.staffchat.commands;
+package com.rezzedup.discordsrv.staffchat.scheduling;
 
-import pl.tlinkowski.annotation.basic.NonNullPackage;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+
+public final class TaskHandle {
+	private final AtomicBoolean cancelled = new AtomicBoolean();
+	private final AtomicReference<Runnable> cancelAction = new AtomicReference<>(() -> { });
+	
+	public void bind(Runnable action) {
+		cancelAction.set(action);
+		if (cancelled.get()) {
+			action.run();
+		}
+	}
+	
+	public void cancel() {
+		if (cancelled.compareAndSet(false, true)) {
+			cancelAction.get().run();
+		}
+	}
+	
+	public boolean isCancelled() {
+		return cancelled.get();
+	}
+}

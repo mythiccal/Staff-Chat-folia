@@ -1,6 +1,6 @@
 /*
  * The MIT License
- * Copyright © 2017-2024 RezzedUp and Contributors
+ * Copyright © 2017-2026 RezzedUp and Contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,29 +25,32 @@ package com.rezzedup.discordsrv.staffchat;
 import com.rezzedup.discordsrv.staffchat.config.StaffChatConfig;
 import com.rezzedup.discordsrv.staffchat.events.AutoStaffChatToggleEvent;
 import com.rezzedup.discordsrv.staffchat.events.ReceivingStaffChatToggleEvent;
+import com.rezzedup.discordsrv.staffchat.scheduling.TaskHandle;
 import community.leaf.configvalues.bukkit.YamlValue;
 import community.leaf.configvalues.bukkit.data.YamlDataFile;
 import community.leaf.configvalues.bukkit.util.Sections;
-import community.leaf.tasks.TaskContext;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
-import org.bukkit.scheduler.BukkitTask;
 import pl.tlinkowski.annotation.basic.NullOr;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 public class Data extends YamlDataFile implements StaffChatData {
 	private static final String PROFILES_PATH = "staff-chat.profiles";
 	
 	private final Map<UUID, Profile> profilesByUuid = new HashMap<>();
 	
+	private final Object lock = new Object();
+	
 	private final StaffChatPlugin plugin;
 	
-	private @NullOr TaskContext<BukkitTask> task = null;
+	private @NullOr TaskHandle task = null;
 	
 	Data(StaffChatPlugin plugin) {
 		super(plugin.directory().resolve("data"), "staff-chat.data.yml");
@@ -67,36 +70,74 @@ public class Data extends YamlDataFile implements StaffChatData {
 		}
 		
 		// Start the save task.
-		task = plugin.async().every(2).minutes().run(() -> {
-			if (isUpdated()) {
-				save();
-			}
-		});
+		task = plugin.scheduler().runAsyncRepeating(2, 2, TimeUnit.MINUTES, this::saveIfUpdated);
 		
 		// Update profiles of all online players when reloaded.
-		reloadsWith(() -> plugin.getServer().getOnlinePlayers().forEach(this::updateProfile));
+		reloadsWith(this::refreshOnlineProfiles);
+	}
+	
+	public void reloadSynced() {
+		synchronized (lock) {
+			reload();
+		}
+	}
+	
+	@Override
+	public void save() {
+		synchronized (lock) {
+			super.save();
+		}
 	}
 	
 	protected void end() {
 		if (task != null) {
 			task.cancel();
 		}
-		if (isUpdated()) {
-			save();
+		saveIfUpdated();
+	}
+	
+	private void saveIfUpdated() {
+		synchronized (lock) {
+			if (isUpdated()) {
+				super.save();
+			}
+		}
+	}
+	
+	private void refreshOnlineProfiles() {
+		for (Player player : new ArrayList<>(plugin.getServer().getOnlinePlayers())) {
+			plugin.scheduler().runEntity(player, () -> updateProfile(player));
+		}
+	}
+	
+	public boolean hasAutomaticStaffChat(UUID uuid) {
+		synchronized (lock) {
+			@NullOr Profile profile = profilesByUuid.get(uuid);
+			return profile != null && profile.automaticStaffChat();
 		}
 	}
 	
 	@Override
 	public StaffChatProfile getOrCreateProfile(UUID uuid) {
-		return profilesByUuid.computeIfAbsent(uuid, k -> new Profile(plugin, this, k));
+		synchronized (lock) {
+			return profilesByUuid.computeIfAbsent(uuid, k -> new Profile(plugin, this, k));
+		}
 	}
 	
 	@Override
 	public Optional<StaffChatProfile> getProfile(UUID uuid) {
-		return Optional.ofNullable(profilesByUuid.get(uuid));
+		synchronized (lock) {
+			return Optional.ofNullable(profilesByUuid.get(uuid));
+		}
 	}
 	
 	public void updateProfile(Player player) {
+		synchronized (lock) {
+			updateProfileLocked(player);
+		}
+	}
+	
+	private void updateProfileLocked(Player player) {
 		@NullOr Profile profile = profilesByUuid.get(player.getUniqueId());
 		
 		if (Permissions.ACCESS.allows(player)) {
@@ -138,20 +179,20 @@ public class Data extends YamlDataFile implements StaffChatData {
 		static final YamlValue<Boolean> MUTED_SOUNDS_TOGGLE = YamlValue.ofBoolean("toggles.muted-sounds").maybe();
 		
 		private final StaffChatPlugin plugin;
-		private final YamlDataFile yaml;
+		private final Data data;
 		private final UUID uuid;
 		
 		private @NullOr Instant auto;
 		private @NullOr Instant left;
 		private boolean mutedSounds = false;
 		
-		Profile(StaffChatPlugin plugin, YamlDataFile yaml, UUID uuid) {
+		Profile(StaffChatPlugin plugin, Data data, UUID uuid) {
 			this.plugin = plugin;
-			this.yaml = yaml;
+			this.data = data;
 			this.uuid = uuid;
 			
 			if (plugin.config().getOrDefault(StaffChatConfig.PERSIST_TOGGLES)) {
-				Sections.get(yaml.data(), path()).ifPresent(section ->
+				Sections.get(data.data(), path()).ifPresent(section ->
 				{
 					auto = AUTO_TOGGLE_DATE.get(section).orElse(null);
 					left = LEFT_TOGGLE_DATE.get(section).orElse(null);
@@ -171,12 +212,16 @@ public class Data extends YamlDataFile implements StaffChatData {
 		
 		@Override
 		public Optional<Instant> sinceEnabledAutoChat() {
-			return Optional.ofNullable(auto);
+			synchronized (data.lock) {
+				return Optional.ofNullable(auto);
+			}
 		}
 		
 		@Override
 		public boolean automaticStaffChat() {
-			return auto != null;
+			synchronized (data.lock) {
+				return auto != null;
+			}
 		}
 		
 		@Override
@@ -185,19 +230,25 @@ public class Data extends YamlDataFile implements StaffChatData {
 				return;
 			}
 			
-			auto = (enabled) ? Instant.now() : null;
-			updateStoredProfileData();
+			synchronized (data.lock) {
+				auto = (enabled) ? Instant.now() : null;
+				updateStoredProfileData();
+			}
 		}
 		
 		@Override
 		public Optional<Instant> sinceLeftStaffChat() {
-			return Optional.ofNullable(left);
+			synchronized (data.lock) {
+				return Optional.ofNullable(left);
+			}
 		}
 		
 		@Override
 		public boolean receivesStaffChatMessages() {
-			// hasn't left the staff chat or leaving is disabled outright
-			return left == null || !plugin.config().getOrDefault(StaffChatConfig.LEAVING_STAFFCHAT_ENABLED);
+			synchronized (data.lock) {
+				// hasn't left the staff chat or leaving is disabled outright
+				return left == null || !plugin.config().getOrDefault(StaffChatConfig.LEAVING_STAFFCHAT_ENABLED);
+			}
 		}
 		
 		@Override
@@ -206,18 +257,24 @@ public class Data extends YamlDataFile implements StaffChatData {
 				return;
 			}
 			
-			left = (enabled) ? null : Instant.now();
-			updateStoredProfileData();
+			synchronized (data.lock) {
+				left = (enabled) ? null : Instant.now();
+				updateStoredProfileData();
+			}
 		}
 		
 		@Override
 		public boolean receivesStaffChatSounds() {
-			return !mutedSounds;
+			synchronized (data.lock) {
+				return !mutedSounds;
+			}
 		}
 		
 		@Override
 		public void receivesStaffChatSounds(boolean enabled) {
-			mutedSounds = !enabled;
+			synchronized (data.lock) {
+				mutedSounds = !enabled;
+			}
 		}
 		
 		boolean hasDefaultSettings() {
@@ -225,31 +282,40 @@ public class Data extends YamlDataFile implements StaffChatData {
 		}
 		
 		void clearStoredProfileData() {
-			if (!plugin.config().getOrDefault(StaffChatConfig.PERSIST_TOGGLES)) {
-				return;
+			synchronized (data.lock) {
+				if (!plugin.config().getOrDefault(StaffChatConfig.PERSIST_TOGGLES)) {
+					return;
+				}
+				
+				data.data().set(path(), null);
+				data.updated(true);
 			}
-			
-			yaml.data().set(path(), null);
-			yaml.updated(true);
 		}
 		
 		void updateStoredProfileData() {
+			synchronized (data.lock) {
+				writeStoredProfileData();
+			}
+		}
+		
+		private void writeStoredProfileData() {
 			if (!plugin.config().getOrDefault(StaffChatConfig.PERSIST_TOGGLES)) {
 				return;
 			}
 			
 			if (hasDefaultSettings()) {
-				clearStoredProfileData();
+				data.data().set(path(), null);
+				data.updated(true);
 				return;
 			}
 			
-			ConfigurationSection section = Sections.getOrCreate(yaml.data(), path());
+			ConfigurationSection section = Sections.getOrCreate(data.data(), path());
 			
 			AUTO_TOGGLE_DATE.set(section, auto);
 			LEFT_TOGGLE_DATE.set(section, left);
 			MUTED_SOUNDS_TOGGLE.set(section, mutedSounds);
 			
-			yaml.updated(true);
+			data.updated(true);
 		}
 	}
 }

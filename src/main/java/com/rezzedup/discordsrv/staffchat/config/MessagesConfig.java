@@ -1,6 +1,6 @@
 /*
  * The MIT License
- * Copyright © 2017-2024 RezzedUp and Contributors
+ * Copyright © 2017-2026 RezzedUp and Contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,6 @@ import org.bukkit.entity.Player;
 import pl.tlinkowski.annotation.basic.NullOr;
 
 import java.util.List;
-import java.util.function.Predicate;
 
 public class MessagesConfig extends YamlDataFile {
 	public static final YamlValue<Version> VERSION =
@@ -207,24 +206,27 @@ public class MessagesConfig extends YamlDataFile {
 	}
 	
 	private void sendNotification(Player player, String message) {
+		plugin.scheduler().runEntity(player, () -> sendDirect(player, message));
+	}
+	
+	private void sendDirect(Player player, String message) {
 		player.sendMessage(message);
 		plugin.config().playNotificationSound(player);
 	}
 	
 	private void sendNotification(Player player, DefaultYamlValue<String> self, @NullOr DefaultYamlValue<String> others) {
-		MappedPlaceholder placeholders = placeholders(player);
-		sendNotification(player, Strings.colorful(placeholders.update(getOrDefault(self))));
-		
-		if (others == null) {
-			return;
-		}
-		
-		String notification = Strings.colorful(placeholders.update(getOrDefault(others)));
-		plugin.getServer().getConsoleSender().sendMessage(notification);
-		
-		plugin.onlineStaffChatParticipants()
-			.filter(Predicate.not(player::equals))
-			.forEach(staff -> sendNotification(staff, notification));
+		plugin.scheduler().runEntity(player, () -> {
+			MappedPlaceholder placeholders = placeholders(player);
+			sendDirect(player, Strings.colorful(placeholders.update(getOrDefault(self))));
+			
+			if (others == null) {
+				return;
+			}
+			
+			String notification = Strings.colorful(placeholders.update(getOrDefault(others)));
+			plugin.deliverToConsole(notification);
+			plugin.deliverToReceivingStaff(player, staff -> sendDirect(staff, notification));
+		});
 	}
 	
 	public void notifyAutoChatEnabled(Player enabler) {

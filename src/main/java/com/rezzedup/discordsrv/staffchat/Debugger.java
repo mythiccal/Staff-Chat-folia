@@ -1,6 +1,6 @@
 /*
  * The MIT License
- * Copyright © 2017-2024 RezzedUp and Contributors
+ * Copyright © 2017-2026 RezzedUp and Contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -48,8 +48,9 @@ public class Debugger {
 	private final StaffChatPlugin plugin;
 	private final Path debugToggleFile;
 	private final Path debugLogFile;
+	private final Object logLock = new Object();
 	
-	private boolean isEnabled;
+	private volatile boolean isEnabled;
 	
 	public Debugger(StaffChatPlugin plugin) {
 		this.plugin = plugin;
@@ -67,24 +68,26 @@ public class Debugger {
 	}
 	
 	public void setEnabled(boolean enabled) {
-		if (this.isEnabled == enabled) {
-			return;
-		}
-		
-		this.isEnabled = enabled;
-		
-		try {
-			if (enabled) {
-				printThenWriteToLogFile("========== Starting Debugger ==========");
-				if (!isToggleFilePresent()) {
-					Files.createFile(debugToggleFile);
-				}
-			} else {
-				printThenWriteToLogFile("========== Disabled Debugger ==========");
-				Files.deleteIfExists(debugToggleFile);
+		synchronized (logLock) {
+			if (this.isEnabled == enabled) {
+				return;
 			}
-		} catch (IOException e) {
-			e.printStackTrace();
+			
+			this.isEnabled = enabled;
+			
+			try {
+				if (enabled) {
+					printThenWriteToLogFile("========== Starting Debugger ==========");
+					if (!isToggleFilePresent()) {
+						Files.createFile(debugToggleFile);
+					}
+				} else {
+					printThenWriteToLogFile("========== Disabled Debugger ==========");
+					Files.deleteIfExists(debugToggleFile);
+				}
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
 		}
 	}
 	
@@ -99,15 +102,17 @@ public class Debugger {
 	}
 	
 	private void printThenWriteToLogFile(String message) {
-		plugin.getLogger().info("[Debug] " + message);
-		
-		try {
-			if (!Files.isRegularFile(debugLogFile)) {
-				Files.createFile(debugLogFile);
+		synchronized (logLock) {
+			plugin.getLogger().info("[Debug] " + message);
+			
+			try {
+				if (!Files.isRegularFile(debugLogFile)) {
+					Files.createFile(debugLogFile);
+				}
+				Files.write(debugLogFile, ("[" + now() + "] " + message + "\n").getBytes(), StandardOpenOption.APPEND);
+			} catch (IOException e) {
+				e.printStackTrace();
 			}
-			Files.write(debugLogFile, ("[" + now() + "] " + message + "\n").getBytes(), StandardOpenOption.APPEND);
-		} catch (IOException e) {
-			e.printStackTrace();
 		}
 	}
 	
@@ -116,11 +121,11 @@ public class Debugger {
 			return;
 		}
 		
-		// Log status directly on the next tick.
-		plugin.sync().run(() -> logPluginStatus(clazz, context + " (Initial)"));
+		// Log status on the next global tick.
+		plugin.scheduler().runGlobalDelayed(1L, () -> logPluginStatus(clazz, context + " (Initial)"));
 		
 		// Log status 30 seconds after so that DiscordSRV has a chance to connect.
-		plugin.sync().delay(30).seconds().run(() -> logPluginStatus(clazz, context + " (30 Seconds)"));
+		plugin.scheduler().runGlobalDelayed(20L * 30L, () -> logPluginStatus(clazz, context + " (30 Seconds)"));
 	}
 	
 	private void logPluginStatus(Class<?> clazz, String context) {

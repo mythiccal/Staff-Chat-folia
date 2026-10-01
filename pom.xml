@@ -30,8 +30,8 @@
   
   <repositories>
     <repository>
-      <id>spigot-repo</id>
-      <url>https://hub.spigotmc.org/nexus/content/repositories/snapshots/</url>
+      <id>papermc</id>
+      <url>https://repo.papermc.io/repository/maven-public/</url>
     </repository>
     <repository>
       <id>scarsz-nexus</id>
@@ -44,10 +44,10 @@
   </repositories>
   
   <dependencies>
-    <!-- Spigot API (via spigot-repo) -->
+    <!-- Paper API (includes Bukkit; Folia and Canvas schedulers) -->
     <dependency>
-      <groupId>org.spigotmc</groupId>
-      <artifactId>spigot-api</artifactId>
+      <groupId>io.papermc.paper</groupId>
+      <artifactId>paper-api</artifactId>
       <version>1.21.3-R0.1-SNAPSHOT</version>
       <scope>provided</scope>
     </dependency>
@@ -77,12 +77,6 @@
       <artifactId>events-bukkit</artifactId>
       <version>0.4.0</version>
     </dependency>
-    <!-- LeafCommunity Tasks (via jitpack.io) -->
-    <dependency>
-      <groupId>community.leaf.tasks</groupId>
-      <artifactId>tasks-bukkit</artifactId>
-      <version>0.0.2</version>
-    </dependency>
     <!-- Java SemVer (via maven-central) -->
     <!-- https://github.com/zafarkhaja/jsemver -->
     <dependency>
@@ -94,7 +88,7 @@
     <dependency>
       <groupId>org.bstats</groupId>
       <artifactId>bstats-bukkit</artifactId>
-      <version>3.0.2</version>
+      <version>3.2.1</version>
     </dependency>
     <!-- Nullness Annotations: @NullOr (via maven-central) -->
     <dependency>

@@ -20,7 +20,30 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-@NonNullPackage
-package com.rezzedup.discordsrv.staffchat.commands;
+package com.rezzedup.discordsrv.staffchat.scheduling;
 
-import pl.tlinkowski.annotation.basic.NonNullPackage;
+import org.bukkit.entity.Entity;
+
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
+
+public interface ServerScheduler {
+	void runGlobal(Runnable task);
+	
+	void runGlobalDelayed(long delayTicks, Runnable task);
+	
+	void runAsync(Runnable task);
+	
+	TaskHandle runAsyncRepeating(long initialDelay, long period, TimeUnit unit, Runnable task);
+	
+	void runEntity(Entity entity, Runnable task);
+	
+	void runEntityDelayed(Entity entity, long delayTicks, Runnable task);
+	
+	TaskHandle runEntityRepeating(
+		Entity entity,
+		long initialDelayTicks,
+		long periodTicks,
+		Consumer<TaskHandle> task
+	);
+}
